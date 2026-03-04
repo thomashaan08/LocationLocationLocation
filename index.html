@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Location, Location, Location!</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #fff1e5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 8px;
+      gap: 8px;
+    }
+
+    h1 {
+      font-size: clamp(1.1rem, 4.5vw, 1.75rem);
+      font-weight: 800;
+      color: #222;
+      letter-spacing: -0.5px;
+      text-align: center;
+    }
+
+    #turn-banner {
+      font-size: clamp(0.82rem, 2.8vw, 0.98rem);
+      font-weight: 700;
+      padding: 5px 18px;
+      border-radius: 99px;
+      background: #fff;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+      color: #333;
+    }
+
+    #game-container {
+      display: flex;
+      gap: 14px;
+      width: 100%;
+      max-width: 860px;
+      align-items: flex-start;
+    }
+
+    #board-col {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+    }
+
+    #board {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      cursor: crosshair;
+      touch-action: none;
+      border: 3px solid #444;
+      border-radius: 3px;
+    }
+
+    #board.forced {
+      border-color: #c02000;
+      box-shadow: 0 0 0 3px rgba(192,32,0,0.25);
+    }
+
+    #action-hint {
+      margin-top: 6px;
+      min-height: 1.3em;
+      font-size: clamp(0.74rem, 2.4vw, 0.88rem);
+      text-align: center;
+      color: #666;
+      font-style: italic;
+    }
+
+    #action-hint.warn {
+      color: #c02000;
+      font-weight: 700;
+      font-style: normal;
+    }
+
+    /* ── Scoreboard ─────────────────────────────── */
+    #scoreboard {
+      width: 210px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .pcard {
+      border-radius: 8px;
+      padding: 9px 11px;
+      border-left: 5px solid transparent;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.1);
+      opacity: 0.55;
+      transition: opacity 0.15s, box-shadow 0.15s;
+    }
+
+    .pcard.active {
+      opacity: 1;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+    }
+
+    .pcard.dead { opacity: 0.28; }
+
+    .pcard-name {
+      font-weight: 700;
+      font-size: 0.88rem;
+      margin-bottom: 5px;
+    }
+
+    .pcard-stats {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      column-gap: 7px;
+      row-gap: 2px;
+      font-size: 0.74rem;
+    }
+
+    .lbl { color: #777; }
+    .val { font-weight: 600; color: #222; }
+    .val.neg { color: #c02000; }
+
+    /* ── Win overlay ────────────────────────────── */
+    #overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+
+    #overlay.show { display: flex; }
+
+    #win-box {
+      background: #fff;
+      border-radius: 16px;
+      padding: 36px 44px;
+      text-align: center;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+      max-width: 340px;
+      width: 90%;
+    }
+
+    #win-box h2 { font-size: 1.8rem; margin-bottom: 8px; }
+    #win-box p  { color: #555; margin-bottom: 22px; font-size: 1rem; }
+
+    #win-box button {
+      padding: 9px 26px;
+      font-size: 0.95rem;
+      border: none;
+      border-radius: 8px;
+      background: #333;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    #win-box button:hover { background: #555; }
+
+    /* ── Narrow / portrait ──────────────────────── */
+    @media (max-width: 560px) {
+      #game-container { flex-direction: column; align-items: center; }
+      #scoreboard { width: 100%; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+      .pcard { flex: 1 1 calc(50% - 3px); min-width: 130px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Location, Location, Location!</h1>
+  <div id="turn-banner">Turn: Player Blue</div>
+
+  <div id="game-container">
+    <div id="board-col">
+      <canvas id="board"></canvas>
+      <div id="action-hint">Click anywhere to place a store.</div>
+    </div>
+    <div id="scoreboard"></div>
+  </div>
+
+  <div id="overlay">
+    <div id="win-box">
+      <h2 id="win-title">Winner!</h2>
+      <p  id="win-msg" >Player Blue wins!</p>
+      <button onclick="resetGame()">Play Again</button>
+    </div>
+  </div>
+
+<script>
+'use strict';
+
+// ── Palette ──────────────────────────────────────────────────────────────────
+const COLORS = ['blue', 'red', 'green', 'yellow'];
+
+const NAMES = {
+  blue:   'Player Blue',
+  red:    'Player Red',
+  green:  'Player Green',
+  yellow: 'Player Yellow',
+};
+
+// Pastel territory fill [r, g, b, a 0-255]
+const FILL = {
+  blue:   [174, 217, 230, 215],
+  red:    [240, 128, 128, 215],
+  green:  [128, 217, 128, 215],
+  yellow: [242, 217,  77, 215],
+};
+
+// Vivid dot / accent colors
+const ACCENT = {
+  blue:   '#1a5fd4',
+  red:    '#cc2020',
+  green:  '#1a9c1a',
+  yellow: '#b89600',
+};
+
+// Card backgrounds
+const CARDBG = {
+  blue:   '#daeef6',
+  red:    '#fad0d0',
+  green:  '#d0f0d0',
+  yellow: '#f8eeaa',
+};
+
+// ── Voronoi grid resolution ───────────────────────────────────────────────────
+// 300 gives sharp-enough territory borders at fast speed.
+const VRES = 300;
+
+// ── Mutable game state ────────────────────────────────────────────────────────
+let pts     = [];              // { x, y, ci }   x,y ∈ [0,1], ci = color index 0-3
+let budgets = [100, 100, 100, 100];
+let counts  = [0, 0, 0, 0];
+let alive   = [true, true, true, true];
+let turn    = 0;               // color index of current player
+let over    = false;
+
+// Cached stats shown on the scoreboard (from last completed move)
+let lastShares  = [0, 0, 0, 0];
+let lastIncomes = [0, 0, 0, 0];
+let lastCosts   = [0, 0, 0, 0];
+
+// ── Voronoi computation ───────────────────────────────────────────────────────
+const offC = document.createElement('canvas');
+offC.width = offC.height = VRES;
+const offX = offC.getContext('2d');
+
+// Flat array: nearest color index per pixel (-1 = unclaimed / no points yet)
+const voronoiNearest = new Int8Array(VRES * VRES);
+
+function computeVoronoi() {
+  const img = offX.createImageData(VRES, VRES);
+  const d   = img.data;
+  voronoiNearest.fill(-1);
+
+  if (pts.length === 0) {
+    // Neutral warm-grey when nobody has placed anything
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = 224; d[i+1] = 218; d[i+2] = 208; d[i+3] = 255;
+    }
+    offX.putImageData(img, 0, 0);
+    return;
+  }
+
+  for (let row = 0; row < VRES; row++) {
+    // row 0 = top of canvas = game y=1 (matching matplotlib's origin='lower')
+    const gy = 1 - row / (VRES - 1);
+
+    for (let col = 0; col < VRES; col++) {
+      const gx = col / (VRES - 1);
+
+      let minD = Infinity, nearest = -1;
+      for (let k = 0; k < pts.length; k++) {
+        // Manhattan distance (matching the Python game)
+        const D = Math.abs(gx - pts[k].x) + Math.abs(gy - pts[k].y);
+        if (D < minD) { minD = D; nearest = pts[k].ci; }
+      }
+
+      voronoiNearest[row * VRES + col] = nearest;
+
+      const rgba = FILL[COLORS[nearest]];
+      const i = (row * VRES + col) * 4;
+      d[i] = rgba[0]; d[i+1] = rgba[1]; d[i+2] = rgba[2]; d[i+3] = rgba[3];
+    }
+  }
+  offX.putImageData(img, 0, 0);
+}
+
+function calcShares() {
+  const cnt   = [0, 0, 0, 0];
+  const total = VRES * VRES;
+  for (let i = 0; i < total; i++) {
+    const c = voronoiNearest[i];
+    if (c >= 0) cnt[c]++;
+  }
+  return cnt.map(c => c / total);
+}
+
+// ── Canvas rendering ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('board');
+canvas.width  = VRES;
+canvas.height = VRES;
+const ctx = canvas.getContext('2d');
+
+function gameToCanvas(gx, gy) {
+  // Flip y so game y=0 is at the bottom of the canvas
+  return { cx: gx * VRES, cy: (1 - gy) * VRES };
+}
+
+function draw() {
+  // 1. Territory (from off-screen canvas)
+  ctx.drawImage(offC, 0, 0);
+
+  // 2. Light grid
+  ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+  ctx.lineWidth = 0.6;
+  for (let i = 1; i < 10; i++) {
+    const v = (i / 10) * VRES;
+    ctx.beginPath(); ctx.moveTo(v, 0);    ctx.lineTo(v, VRES); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, v);    ctx.lineTo(VRES, v); ctx.stroke();
+  }
+
+  // 3. Store dots
+  for (const p of pts) {
+    const { cx, cy } = gameToCanvas(p.x, p.y);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = ACCENT[COLORS[p.ci]];
+    ctx.fill();
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // 4. Highlight current player's stores in forced-removal mode
+  if (!over && alive[turn] && budgets[turn] < 0 && counts[turn] > 0) {
+    for (const p of pts) {
+      if (p.ci !== turn) continue;
+      const { cx, cy } = gameToCanvas(p.x, p.y);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+      ctx.strokeStyle = '#c02000';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+  }
+}
+
+// ── Budget update (mirrors Python logic exactly) ──────────────────────────────
+// All players earn income and pay maintenance every turn.
+// The active player additionally pays a placement fee (+20) or removal credit (-10).
+// counts[] must already be updated before calling this.
+function updateBudgets(activeCi, movetype) {
+  computeVoronoi();  // also fills voronoiNearest for calcShares
+
+  const shares = calcShares();
+  lastShares  = shares.slice();
+  lastIncomes = shares.map(s => s * 100);
+
+  const costs = counts.map(n => 10 * n);   // maintenance: 10 per store
+  if (movetype === 1) costs[activeCi] += 20; // placement fee
+  if (movetype === 2) costs[activeCi] -= 10; // removal credit
+  lastCosts = costs.slice();
+
+  for (let ci = 0; ci < 4; ci++) {
+    budgets[ci] += lastIncomes[ci] - costs[ci];
+  }
+}
+
+// ── Turn management ───────────────────────────────────────────────────────────
+
+// Check for a winner and trigger the end screen if found.
+function checkWin() {
+  const survivors = alive.reduce((acc, a) => acc + (a ? 1 : 0), 0);
+  if (survivors > 1) return false;
+  over = true;
+  const winnerCi = survivors === 1 ? alive.findIndex(a => a) : -1;
+  showEndScreen(winnerCi);
+  return true;
+}
+
+// Advance `turn` to the next alive player.
+// After returning, `turn` points to the next player (may still need a prepareTurn check).
+function advanceTurn() {
+  for (let i = 0; i < COLORS.length; i++) {
+    turn = (turn + 1) % COLORS.length;
+    if (alive[turn]) break;
+  }
+}
+
+// Called at the start of a player's turn.
+// Auto-eliminates any player whose budget is negative AND who has no stores,
+// then checks for a winner and refreshes the UI.
+function prepareTurn() {
+  // Guard: up to 4 passes in case consecutive players need auto-elimination
+  for (let pass = 0; pass < COLORS.length; pass++) {
+    if (!alive[turn]) { advanceTurn(); continue; }
+
+    if (budgets[turn] < 0 && counts[turn] === 0) {
+      // Player has negative budget with no stores to remove → eliminated
+      alive[turn] = false;
+      if (checkWin()) { draw(); updateUI(); return; }
+      advanceTurn();
+      continue;
+    }
+
+    break; // this player can make a move
+  }
+
+  updateUI();
+  draw();
+}
+
+// ── Input handling ────────────────────────────────────────────────────────────
+
+function cssToGame(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x:  (clientX - rect.left)  / rect.width,
+    y:  1 - (clientY - rect.top) / rect.height,   // flip y
+  };
+}
+
+function handleInput(clientX, clientY) {
+  if (over) return;
+
+  const { x, y } = cssToGame(clientX, clientY);
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+
+  const ci = turn;
+  let movetype = 0;
+
+  if (budgets[ci] >= 0) {
+    // ── Place a new store ──────────────────────
+    pts.push({ x, y, ci });
+    counts[ci]++;
+    movetype = 1;
+
+  } else {
+    // ── Forced removal: must click an own store ─
+    // Use Manhattan distance in game coords; VRES-based tolerance ≈ 3.5% of board.
+    const TOL = 0.04;
+    let bestDist = TOL, bestIdx = -1;
+
+    for (let k = 0; k < pts.length; k++) {
+      if (pts[k].ci !== ci) continue;
+      const dist = Math.abs(x - pts[k].x) + Math.abs(y - pts[k].y);
+      if (dist < bestDist) { bestDist = dist; bestIdx = k; }
+    }
+
+    if (bestIdx === -1) return;  // didn't click near own store — ignore
+
+    pts.splice(bestIdx, 1);
+    counts[ci]--;
+    movetype = 2;
+  }
+
+  // Update every player's budget
+  updateBudgets(ci, movetype);
+
+  // Check if the active player just eliminated themselves
+  // (only possible after a removal that leaves them with 0 stores and still negative budget)
+  if (budgets[ci] < 0 && counts[ci] === 0) {
+    alive[ci] = false;
+  }
+
+  if (checkWin()) { draw(); updateUI(); return; }
+
+  advanceTurn();
+  prepareTurn();
+}
+
+canvas.addEventListener('click', e => {
+  e.preventDefault();
+  handleInput(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  handleInput(t.clientX, t.clientY);
+}, { passive: false });
+
+// ── Scoreboard ────────────────────────────────────────────────────────────────
+const scoreboard = document.getElementById('scoreboard');
+
+function updateUI() {
+  // Turn banner
+  const tc = COLORS[turn];
+  document.getElementById('turn-banner').textContent =
+    over ? 'Game Over' : `Turn: ${NAMES[tc]}`;
+
+  // Action hint + forced-removal styling
+  const hint  = document.getElementById('action-hint');
+  const board = document.getElementById('board');
+
+  if (!over && alive[turn] && budgets[turn] < 0 && counts[turn] > 0) {
+    hint.textContent = '⚠ Budget is negative — click one of your highlighted stores to remove it.';
+    hint.className = 'warn';
+    board.className = 'forced';
+  } else {
+    hint.textContent = over ? '' : 'Click anywhere on the board to place a store.';
+    hint.className = '';
+    board.className = '';
+  }
+
+  // Player cards
+  scoreboard.innerHTML = '';
+  for (let ci = 0; ci < COLORS.length; ci++) {
+    const c    = COLORS[ci];
+    const card = document.createElement('div');
+
+    card.className = 'pcard'
+      + (!alive[ci]          ? ' dead'   : '')
+      + (ci === turn && !over ? ' active' : '');
+
+    card.style.borderLeftColor = ACCENT[c];
+    card.style.background      = CARDBG[c];
+
+    const neg    = budgets[ci] < 0;
+    const status = !alive[ci] ? 'Eliminated' : ci === turn ? 'Your turn ◀' : 'Alive';
+
+    card.innerHTML = `
+      <div class="pcard-name">${NAMES[c]}${!alive[ci] ? ' 💀' : ''}</div>
+      <div class="pcard-stats">
+        <span class="lbl">Stores</span>  <span class="val">${counts[ci]}</span>
+        <span class="lbl">Area</span>    <span class="val">${(lastShares[ci] * 100).toFixed(1)}%</span>
+        <span class="lbl">Income</span>  <span class="val">+${lastIncomes[ci].toFixed(1)}</span>
+        <span class="lbl">Costs</span>   <span class="val">−${lastCosts[ci].toFixed(1)}</span>
+        <span class="lbl">Budget</span>  <span class="val ${neg ? 'neg' : ''}">${budgets[ci].toFixed(1)}</span>
+        <span class="lbl">Status</span>  <span class="val">${status}</span>
+      </div>`;
+
+    scoreboard.appendChild(card);
+  }
+}
+
+// ── End screen ────────────────────────────────────────────────────────────────
+function showEndScreen(winnerCi) {
+  const title = document.getElementById('win-title');
+  const msg   = document.getElementById('win-msg');
+
+  if (winnerCi < 0) {
+    title.textContent = 'Draw!';
+    title.style.color = '#333';
+    msg.textContent   = 'All players have been eliminated simultaneously.';
+  } else {
+    const wc = COLORS[winnerCi];
+    title.textContent = `${NAMES[wc]} wins!`;
+    title.style.color = ACCENT[wc];
+    msg.textContent   = 'Last store standing — the market is yours!';
+  }
+
+  document.getElementById('overlay').classList.add('show');
+}
+
+// ── Reset / new game ──────────────────────────────────────────────────────────
+function resetGame() {
+  pts      = [];
+  budgets  = [100, 100, 100, 100];
+  counts   = [0, 0, 0, 0];
+  alive    = [true, true, true, true];
+  turn     = 0;
+  over     = false;
+  lastShares  = [0, 0, 0, 0];
+  lastIncomes = [0, 0, 0, 0];
+  lastCosts   = [0, 0, 0, 0];
+
+  document.getElementById('overlay').classList.remove('show');
+  computeVoronoi();
+  prepareTurn();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+computeVoronoi();
+prepareTurn();
+</script>
+</body>
+</html>
