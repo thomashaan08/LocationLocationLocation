@@ -40,7 +40,7 @@
       display: flex;
       gap: 14px;
       width: 100%;
-      max-width: 860px;
+      max-width: 1120px;
       align-items: flex-start;
     }
 
@@ -83,7 +83,7 @@
 
     /* ── Scoreboard ─────────────────────────────── */
     #scoreboard {
-      width: 210px;
+      width: 190px;
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
@@ -123,6 +123,44 @@
     .lbl { color: #777; }
     .val { font-weight: 600; color: #222; }
     .val.neg { color: #c02000; }
+
+    /* ── Graphs ──────────────────────────────────── */
+    #graphs-col {
+      width: 255px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .graph-legend {
+      display: flex;
+      justify-content: space-around;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 0;
+    }
+
+    .graph-wrap {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.1);
+      padding: 7px 7px 5px;
+    }
+
+    .graph-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #444;
+      margin-bottom: 3px;
+      text-align: center;
+    }
+
+    .graph-canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
 
     /* ── Win overlay ────────────────────────────── */
     #overlay {
@@ -164,10 +202,12 @@
     #win-box button:hover { background: #555; }
 
     /* ── Narrow / portrait ──────────────────────── */
-    @media (max-width: 560px) {
+    @media (max-width: 780px) {
       #game-container { flex-direction: column; align-items: center; }
       #scoreboard { width: 100%; flex-direction: row; flex-wrap: wrap; gap: 6px; }
       .pcard { flex: 1 1 calc(50% - 3px); min-width: 130px; }
+      #graphs-col { width: 100%; flex-direction: row; }
+      .graph-wrap { flex: 1; min-width: 0; }
     }
   </style>
 </head>
@@ -181,12 +221,28 @@
       <div id="action-hint">Click anywhere to place a store.</div>
     </div>
     <div id="scoreboard"></div>
+    <div id="graphs-col">
+      <div class="graph-legend">
+        <span style="color:#1a5fd4">&#9632; Blue</span>
+        <span style="color:#cc2020">&#9632; Red</span>
+        <span style="color:#1a9c1a">&#9632; Green</span>
+        <span style="color:#b89600">&#9632; Yellow</span>
+      </div>
+      <div class="graph-wrap">
+        <div class="graph-title">Budget per Player</div>
+        <canvas id="budget-graph" class="graph-canvas"></canvas>
+      </div>
+      <div class="graph-wrap">
+        <div class="graph-title">Controlled Area per Player</div>
+        <canvas id="area-graph" class="graph-canvas"></canvas>
+      </div>
+    </div>
   </div>
 
   <div id="overlay">
     <div id="win-box">
       <h2 id="win-title">Winner!</h2>
-      <p  id="win-msg" >Player Blue wins!</p>
+      <p  id="win-msg">Player Blue wins!</p>
       <button onclick="resetGame()">Play Again</button>
     </div>
   </div>
@@ -229,8 +285,11 @@ const CARDBG = {
 };
 
 // ── Voronoi grid resolution ───────────────────────────────────────────────────
-// 300 gives sharp-enough territory borders at fast speed.
 const VRES = 300;
+
+// ── Minimum Euclidean distance (normalized) between store centres ─────────────
+// Dot radius ≈ 0.0183 in normalized coords; 0.05 gives a clear visual gap.
+const MIN_STORE_DIST = 0.05;
 
 // ── Mutable game state ────────────────────────────────────────────────────────
 let pts     = [];              // { x, y, ci }   x,y ∈ [0,1], ci = color index 0-3
@@ -244,6 +303,11 @@ let over    = false;
 let lastShares  = [0, 0, 0, 0];
 let lastIncomes = [0, 0, 0, 0];
 let lastCosts   = [0, 0, 0, 0];
+
+// ── History for live graphs ───────────────────────────────────────────────────
+// Index 0 = initial state; each move appends one entry per player.
+let budgetHistory = [[100], [100], [100], [100]];
+let areaHistory   = [[0],   [0],   [0],   [0]  ];
 
 // ── Voronoi computation ───────────────────────────────────────────────────────
 const offC = document.createElement('canvas');
@@ -370,6 +434,140 @@ function updateBudgets(activeCi, movetype) {
   for (let ci = 0; ci < 4; ci++) {
     budgets[ci] += lastIncomes[ci] - costs[ci];
   }
+
+  // Record snapshot for live graphs
+  for (let ci = 0; ci < 4; ci++) {
+    budgetHistory[ci].push(budgets[ci]);
+    areaHistory[ci].push(lastShares[ci] * 100);
+  }
+}
+
+// ── Live graphs ───────────────────────────────────────────────────────────────
+const GW = 282, GH = 168;                            // canvas internal resolution
+const GP = { top: 14, right: 10, bottom: 30, left: 42 }; // plot padding
+
+const budgetGfxEl = document.getElementById('budget-graph');
+const areaGfxEl   = document.getElementById('area-graph');
+budgetGfxEl.width  = areaGfxEl.width  = GW;
+budgetGfxEl.height = areaGfxEl.height = GH;
+const bgCtx = budgetGfxEl.getContext('2d');
+const agCtx = areaGfxEl.getContext('2d');
+
+function drawGraphs() {
+  renderGraph(bgCtx, budgetHistory, null, null);
+  renderGraph(agCtx, areaHistory,   0,    100);
+}
+
+function renderGraph(ctx, history, yFixMin, yFixMax) {
+  const pw = GW - GP.left - GP.right;
+  const ph = GH - GP.top  - GP.bottom;
+
+  // Background
+  ctx.fillStyle = '#f9f9f9';
+  ctx.fillRect(0, 0, GW, GH);
+
+  // Determine y range
+  let yMin, yMax;
+  if (yFixMin !== null) {
+    yMin = yFixMin; yMax = yFixMax;
+  } else {
+    let lo = Infinity, hi = -Infinity;
+    for (let ci = 0; ci < 4; ci++) {
+      for (const v of history[ci]) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    if (!isFinite(lo)) { lo = 0; hi = 100; }
+    const span = (hi - lo) || 10;
+    yMin = Math.floor((lo - span * 0.08) / 10) * 10;
+    yMax = Math.ceil( (hi + span * 0.08) / 10) * 10;
+    if (yMin === yMax) { yMin -= 10; yMax += 10; }
+  }
+  const ySpan = yMax - yMin;
+
+  // x-axis: one entry per move (index 0 = initial state)
+  const n    = history[0].length;   // same for all players
+  const xMax = n - 1;               // 0 when only initial state exists
+
+  const toX = t => xMax === 0 ? GP.left : GP.left + (t / xMax) * pw;
+  const toY = v => GP.top + ph - ((v - yMin) / ySpan) * ph;
+
+  // Horizontal gridlines + y-axis labels
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const numY = 5;
+  for (let i = 0; i <= numY; i++) {
+    const v  = yMin + ySpan * i / numY;
+    const py = toY(v);
+    ctx.strokeStyle = '#ebebeb';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(GP.left, py); ctx.lineTo(GP.left + pw, py); ctx.stroke();
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(yFixMax === 100 ? v.toFixed(0) + '%' : v.toFixed(0), GP.left - 3, py);
+  }
+
+  // Dashed zero line for budget graph when range straddles 0
+  if (yFixMin === null && yMin < 0 && yMax > 0) {
+    const py0 = toY(0);
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(GP.left, py0); ctx.lineTo(GP.left + pw, py0); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Axes
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(GP.left, GP.top);
+  ctx.lineTo(GP.left, GP.top + ph);
+  ctx.lineTo(GP.left + pw, GP.top + ph);
+  ctx.stroke();
+
+  // x-axis tick labels
+  ctx.fillStyle = '#aaa';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  if (xMax === 0) {
+    ctx.fillText('0', GP.left, GP.top + ph + 4);
+  } else {
+    const numX = Math.min(xMax, 5);
+    for (let i = 0; i <= numX; i++) {
+      const t = Math.round(i * xMax / numX);
+      ctx.fillText(t, toX(t), GP.top + ph + 4);
+    }
+  }
+
+  // "Turn" axis label
+  ctx.fillStyle = '#bbb';
+  ctx.font = '8px sans-serif';
+  ctx.fillText('Turn', GP.left + pw / 2, GH - 5);
+
+  // Player lines + terminal dots
+  for (let ci = 0; ci < 4; ci++) {
+    const data = history[ci];
+    if (data.length < 1) continue;
+
+    ctx.strokeStyle = ACCENT[COLORS[ci]];
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    for (let t = 0; t < data.length; t++) {
+      const px = toX(t);
+      const py = toY(data[t]);
+      t === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    // Dot at the latest data point
+    const lt = data.length - 1;
+    ctx.beginPath();
+    ctx.arc(toX(lt), toY(data[lt]), 2.8, 0, Math.PI * 2);
+    ctx.fillStyle = ACCENT[COLORS[ci]];
+    ctx.fill();
+  }
 }
 
 // ── Turn management ───────────────────────────────────────────────────────────
@@ -385,7 +583,6 @@ function checkWin() {
 }
 
 // Advance `turn` to the next alive player.
-// After returning, `turn` points to the next player (may still need a prepareTurn check).
 function advanceTurn() {
   for (let i = 0; i < COLORS.length; i++) {
     turn = (turn + 1) % COLORS.length;
@@ -404,7 +601,7 @@ function prepareTurn() {
     if (budgets[turn] < 0 && counts[turn] === 0) {
       // Player has negative budget with no stores to remove → eliminated
       alive[turn] = false;
-      if (checkWin()) { draw(); updateUI(); return; }
+      if (checkWin()) { draw(); updateUI(); drawGraphs(); return; }
       advanceTurn();
       continue;
     }
@@ -414,6 +611,7 @@ function prepareTurn() {
 
   updateUI();
   draw();
+  drawGraphs();
 }
 
 // ── Input handling ────────────────────────────────────────────────────────────
@@ -437,13 +635,19 @@ function handleInput(clientX, clientY) {
 
   if (budgets[ci] >= 0) {
     // ── Place a new store ──────────────────────
+    // Reject if too close to any existing store (prevents visual overlap)
+    for (const p of pts) {
+      const dx = x - p.x, dy = y - p.y;
+      if (Math.sqrt(dx * dx + dy * dy) < MIN_STORE_DIST) return;
+    }
+
     pts.push({ x, y, ci });
     counts[ci]++;
     movetype = 1;
 
   } else {
     // ── Forced removal: must click an own store ─
-    // Use Manhattan distance in game coords; VRES-based tolerance ≈ 3.5% of board.
+    // Use Manhattan distance in game coords; tolerance ≈ 4% of board.
     const TOL = 0.04;
     let bestDist = TOL, bestIdx = -1;
 
@@ -460,7 +664,7 @@ function handleInput(clientX, clientY) {
     movetype = 2;
   }
 
-  // Update every player's budget
+  // Update every player's budget (also records history snapshot)
   updateBudgets(ci, movetype);
 
   // Check if the active player just eliminated themselves
@@ -469,7 +673,7 @@ function handleInput(clientX, clientY) {
     alive[ci] = false;
   }
 
-  if (checkWin()) { draw(); updateUI(); return; }
+  if (checkWin()) { draw(); updateUI(); drawGraphs(); return; }
 
   advanceTurn();
   prepareTurn();
@@ -570,6 +774,10 @@ function resetGame() {
   lastShares  = [0, 0, 0, 0];
   lastIncomes = [0, 0, 0, 0];
   lastCosts   = [0, 0, 0, 0];
+
+  // Reset graph history to initial state
+  budgetHistory = [[100], [100], [100], [100]];
+  areaHistory   = [[0],   [0],   [0],   [0]  ];
 
   document.getElementById('overlay').classList.remove('show');
   computeVoronoi();
