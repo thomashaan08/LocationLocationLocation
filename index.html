@@ -377,7 +377,8 @@ function gameToCanvas(gx, gy) {
 }
 
 function draw() {
-  // 1. Territory (from off-screen canvas)
+  // 1. Clear previous frame entirely, then draw territory
+  ctx.clearRect(0, 0, VRES, VRES);
   ctx.drawImage(offC, 0, 0);
 
   // 2. Light grid
