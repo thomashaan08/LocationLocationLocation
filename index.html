@@ -133,6 +133,8 @@
       letter-spacing: 0.03em;
     }
 
+    .pcard-badge.rival { background: #7a3db8; }
+
     .pcard-stats {
       display: grid;
       grid-template-columns: auto 1fr;
@@ -154,7 +156,7 @@
       gap: 10px;
     }
 
-.graph-wrap {
+    .graph-wrap {
       background: #fff;
       border-radius: 8px;
       box-shadow: 0 1px 5px rgba(0,0,0,0.1);
@@ -230,10 +232,10 @@
     #setup-box {
       background: #fff;
       border-radius: 16px;
-      padding: 30px 36px;
+      padding: 28px 32px;
       text-align: center;
       box-shadow: 0 8px 40px rgba(0,0,0,0.3);
-      max-width: 380px;
+      max-width: 420px;
       width: 90%;
     }
 
@@ -245,15 +247,16 @@
 
     #setup-box .subtitle {
       color: #777;
-      font-size: 0.88rem;
-      margin-bottom: 20px;
+      font-size: 0.83rem;
+      margin-bottom: 18px;
+      line-height: 1.45;
     }
 
     #player-setup {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      margin-bottom: 22px;
+      margin-bottom: 20px;
     }
 
     .setup-row {
@@ -267,7 +270,9 @@
 
     .setup-row-name {
       font-weight: 700;
-      font-size: 0.92rem;
+      font-size: 0.9rem;
+      flex-shrink: 0;
+      margin-right: 10px;
     }
 
     .toggle-group {
@@ -276,21 +281,27 @@
     }
 
     .toggle-btn {
-      padding: 5px 15px;
+      padding: 5px 12px;
       border-radius: 6px;
       border: 1.5px solid #ccc;
       background: #f5f5f5;
       cursor: pointer;
-      font-size: 0.82rem;
+      font-size: 0.78rem;
       font-weight: 600;
       color: #888;
       transition: background 0.12s, color 0.12s, border-color 0.12s;
+      white-space: nowrap;
     }
 
     .toggle-btn.active {
       background: #333;
       color: #fff;
       border-color: #333;
+    }
+
+    .toggle-btn.active.rival-btn {
+      background: #7a3db8;
+      border-color: #7a3db8;
     }
 
     #setup-start {
@@ -328,7 +339,7 @@
     </div>
     <div id="scoreboard"></div>
     <div id="graphs-col">
-<div class="graph-wrap">
+      <div class="graph-wrap">
         <div class="graph-title">Budget per Player</div>
         <canvas id="budget-graph" class="graph-canvas"></canvas>
       </div>
@@ -352,7 +363,12 @@
   <div id="setup-overlay">
     <div id="setup-box">
       <h2>Location, Location, Location!</h2>
-      <p class="subtitle">Choose player types before starting.</p>
+      <p class="subtitle">
+        Choose player types.<br>
+        <b>Greedy AI</b> maximises own area.
+        <b>Rival AI</b> maximises lead over the strongest opponent
+        (budget&nbsp;+&nbsp;area) minus (best opponent's budget&nbsp;+&nbsp;area).
+      </p>
       <div id="player-setup"></div>
       <button id="setup-start" onclick="startGame()">Start Game</button>
     </div>
@@ -399,35 +415,29 @@ const CARDBG = {
 const VRES = 300;
 
 // ── Minimum Euclidean distance (normalized) between store centres ─────────────
-// Dot radius ≈ 0.0183 in normalized coords; 0.05 gives a clear visual gap.
 const MIN_STORE_DIST = 0.05;
 
 // ── AI settings ───────────────────────────────────────────────────────────────
-// Resolution used for fast area evaluation during AI candidate search
-const AI_VRES = 70;
-// Grid size for candidate placement positions (AI_GRID x AI_GRID)
-const AI_GRID = 16;
-// Delay (ms) before AI executes its move, so the board update is visible
-const AI_DELAY_MS = 450;
+const AI_VRES     = 70;   // resolution for fast area evaluation
+const AI_GRID     = 16;   // candidate grid size (AI_GRID × AI_GRID positions)
+const AI_DELAY_MS = 450;  // ms before AI executes, so board update is visible
 
-// Which players are AI-controlled (set by setup screen)
-let isAI = [false, false, false, false];
+// Player types: 0 = human, 1 = Greedy AI (max area), 2 = Rival AI (max relative score)
+let playerType = [0, 0, 0, 0];
 
 // ── Mutable game state ────────────────────────────────────────────────────────
-let pts     = [];              // { x, y, ci }   x,y ∈ [0,1], ci = color index 0-3
+let pts     = [];
 let budgets = [100, 100, 100, 100];
 let counts  = [0, 0, 0, 0];
 let alive   = [true, true, true, true];
-let turn    = 0;               // color index of current player
+let turn    = 0;
 let over    = false;
 
-// Cached stats shown on the scoreboard (from last completed move)
 let lastShares  = [0, 0, 0, 0];
 let lastIncomes = [0, 0, 0, 0];
 let lastCosts   = [0, 0, 0, 0];
 
 // ── History for live graphs ───────────────────────────────────────────────────
-// Index 0 = initial state; each move appends one entry per player.
 let budgetHistory = [[100], [100], [100], [100]];
 let areaHistory   = [[0],   [0],   [0],   [0]  ];
 
@@ -436,7 +446,6 @@ const offC = document.createElement('canvas');
 offC.width = offC.height = VRES;
 const offX = offC.getContext('2d');
 
-// Flat array: nearest color index per pixel (-1 = unclaimed / no points yet)
 const voronoiNearest = new Int8Array(VRES * VRES);
 
 function computeVoronoi() {
@@ -445,7 +454,6 @@ function computeVoronoi() {
   voronoiNearest.fill(-1);
 
   if (pts.length === 0) {
-    // Neutral warm-grey when nobody has placed anything
     for (let i = 0; i < d.length; i += 4) {
       d[i] = 224; d[i+1] = 218; d[i+2] = 208; d[i+3] = 255;
     }
@@ -454,21 +462,15 @@ function computeVoronoi() {
   }
 
   for (let row = 0; row < VRES; row++) {
-    // row 0 = top of canvas = game y=1 (matching matplotlib's origin='lower')
     const gy = 1 - row / (VRES - 1);
-
     for (let col = 0; col < VRES; col++) {
       const gx = col / (VRES - 1);
-
       let minD = Infinity, nearest = -1;
       for (let k = 0; k < pts.length; k++) {
-        // Manhattan distance (matching the Python game)
         const D = Math.abs(gx - pts[k].x) + Math.abs(gy - pts[k].y);
         if (D < minD) { minD = D; nearest = pts[k].ci; }
       }
-
       voronoiNearest[row * VRES + col] = nearest;
-
       const rgba = FILL[COLORS[nearest]];
       const i = (row * VRES + col) * 4;
       d[i] = rgba[0]; d[i+1] = rgba[1]; d[i+2] = rgba[2]; d[i+3] = rgba[3];
@@ -489,12 +491,11 @@ function calcShares() {
 
 // ── AI heuristic helpers ──────────────────────────────────────────────────────
 
-// Fast area fraction for player ci given an arbitrary point list.
-// Uses a coarser grid (AI_VRES) for speed; Manhattan distance to match game rules.
-function calcAreaFast(testPts, ci) {
-  if (testPts.length === 0) return 0;
-  let cnt = 0;
+// Single-pass Voronoi at AI_VRES, returning area fractions for all 4 players.
+function calcAllSharesFast(testPts) {
+  const cnt   = [0, 0, 0, 0];
   const total = AI_VRES * AI_VRES;
+  if (testPts.length === 0) return [0, 0, 0, 0];
   for (let row = 0; row < AI_VRES; row++) {
     const gy = 1 - row / (AI_VRES - 1);
     for (let col = 0; col < AI_VRES; col++) {
@@ -504,65 +505,109 @@ function calcAreaFast(testPts, ci) {
         const D = Math.abs(gx - testPts[k].x) + Math.abs(gy - testPts[k].y);
         if (D < minD) { minD = D; nearest = testPts[k].ci; }
       }
-      if (nearest === ci) cnt++;
+      if (nearest >= 0) cnt[nearest]++;
     }
   }
-  return cnt / total;
+  return cnt.map(c => c / total);
+}
+
+// Area fraction for a single player — used by Greedy AI.
+function calcAreaFast(testPts, ci) {
+  return calcAllSharesFast(testPts)[ci];
+}
+
+// Relative score for Rival AI.
+// IndividualScore[ci] = hypothetical budget + area% after the move.
+// RelativeScore      = own IndividualScore − best opponent's IndividualScore.
+function calcRelativeScore(testPts, testCounts, activeCi, movetype) {
+  const shares     = calcAllSharesFast(testPts);
+  const testBudgets = budgets.slice();
+  const costs      = testCounts.map(n => 10 * n);
+  if (movetype === 1) costs[activeCi] += 20;
+  if (movetype === 2) costs[activeCi] -= 10;
+  for (let ci = 0; ci < 4; ci++) {
+    testBudgets[ci] += shares[ci] * 100 - costs[ci];
+  }
+  const indScores = testBudgets.map((b, ci) => b + shares[ci] * 100);
+
+  let bestOther = -Infinity;
+  for (let ci = 0; ci < 4; ci++) {
+    if (ci !== activeCi && indScores[ci] > bestOther) bestOther = indScores[ci];
+  }
+  return indScores[activeCi] - bestOther;
 }
 
 // Execute one AI move for the current player.
 function aiMove() {
   if (over) return;
   const ci = turn;
+  const type = playerType[ci]; // 1 = Greedy, 2 = Rival
 
   if (budgets[ci] >= 0) {
-    // ── Place a store: try all grid candidates, pick the one that maximises area ─
-    let bestArea = -1, bestX = -1, bestY = -1;
+    // ── Placement ─────────────────────────────────────────────────────────────
 
-    for (let r = 0; r < AI_GRID; r++) {
-      for (let c = 0; c < AI_GRID; c++) {
-        const x = (c + 0.5) / AI_GRID;
-        const y = (r + 0.5) / AI_GRID;
+    // Special case: very first move of the game (empty board, always Blue).
+    // Place randomly so the game doesn't always start the same way.
+    if (pts.length === 0 && ci === 0) {
+      const x = Math.random();
+      const y = Math.random();
+      pts.push({ x, y, ci });
+      counts[ci]++;
+      updateBudgets(ci, 1);
 
-        // Enforce minimum distance from every existing store
-        let valid = true;
-        for (const p of pts) {
-          const dx = x - p.x, dy = y - p.y;
-          if (Math.sqrt(dx * dx + dy * dy) < MIN_STORE_DIST) { valid = false; break; }
+    } else {
+      // Evaluate all grid candidates and pick the best according to AI type.
+      let bestScore = -Infinity, bestX = -1, bestY = -1;
+
+      for (let r = 0; r < AI_GRID; r++) {
+        for (let c = 0; c < AI_GRID; c++) {
+          const x = (c + 0.5) / AI_GRID;
+          const y = (r + 0.5) / AI_GRID;
+
+          let valid = true;
+          for (const p of pts) {
+            const dx = x - p.x, dy = y - p.y;
+            if (Math.sqrt(dx * dx + dy * dy) < MIN_STORE_DIST) { valid = false; break; }
+          }
+          if (!valid) continue;
+
+          const testPts = pts.concat({ x, y, ci });
+          const score = type === 2
+            ? calcRelativeScore(testPts, counts.map((n, i) => i === ci ? n + 1 : n), ci, 1)
+            : calcAreaFast(testPts, ci);
+
+          if (score > bestScore) { bestScore = score; bestX = x; bestY = y; }
         }
-        if (!valid) continue;
-
-        const testPts = pts.concat({ x, y, ci });
-        const area = calcAreaFast(testPts, ci);
-        if (area > bestArea) { bestArea = area; bestX = x; bestY = y; }
       }
-    }
 
-    if (bestX < 0) {
-      // No valid placement found (board very crowded); skip turn gracefully
-      advanceTurn();
-      prepareTurn();
-      return;
-    }
+      if (bestX < 0) {
+        // No valid placement (board very crowded); skip gracefully.
+        advanceTurn();
+        prepareTurn();
+        return;
+      }
 
-    pts.push({ x: bestX, y: bestY, ci });
-    counts[ci]++;
-    updateBudgets(ci, 1);
+      pts.push({ x: bestX, y: bestY, ci });
+      counts[ci]++;
+      updateBudgets(ci, 1);
+    }
 
   } else {
-    // ── Forced removal: remove the store whose removal maximises remaining area ─
-    let bestArea = -1, bestIdx = -1;
+    // ── Forced removal ────────────────────────────────────────────────────────
+    let bestScore = -Infinity, bestIdx = -1;
 
     for (let k = 0; k < pts.length; k++) {
       if (pts[k].ci !== ci) continue;
-      // Build point list without store k
-      const testPts = pts.filter((_, i) => i !== k);
-      const area = calcAreaFast(testPts, ci);
-      if (area > bestArea) { bestArea = area; bestIdx = k; }
+      const testPts    = pts.filter((_, i) => i !== k);
+      const testCounts = counts.map((n, i) => i === ci ? n - 1 : n);
+      const score = type === 2
+        ? calcRelativeScore(testPts, testCounts, ci, 2)
+        : calcAreaFast(testPts, ci);
+
+      if (score > bestScore) { bestScore = score; bestIdx = k; }
     }
 
     if (bestIdx === -1) {
-      // No own stores to remove (shouldn't happen, but be safe)
       advanceTurn();
       prepareTurn();
       return;
@@ -573,7 +618,6 @@ function aiMove() {
     updateBudgets(ci, 2);
   }
 
-  // Mirror the post-move logic from handleInput
   if (budgets[ci] < 0 && counts[ci] === 0) alive[ci] = false;
   if (checkWin()) { draw(); updateUI(); drawGraphs(); return; }
 
@@ -588,16 +632,13 @@ canvas.height = VRES;
 const ctx = canvas.getContext('2d');
 
 function gameToCanvas(gx, gy) {
-  // Flip y so game y=0 is at the bottom of the canvas
   return { cx: gx * VRES, cy: (1 - gy) * VRES };
 }
 
 function draw() {
-  // 1. Clear previous frame entirely, then draw territory
   ctx.clearRect(0, 0, VRES, VRES);
   ctx.drawImage(offC, 0, 0);
 
-  // 2. Light grid
   ctx.strokeStyle = 'rgba(0,0,0,0.13)';
   ctx.lineWidth = 0.6;
   for (let i = 1; i < 10; i++) {
@@ -606,7 +647,6 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(0, v);    ctx.lineTo(VRES, v); ctx.stroke();
   }
 
-  // 3. Store dots
   for (const p of pts) {
     const { cx, cy } = gameToCanvas(p.x, p.y);
     ctx.beginPath();
@@ -618,7 +658,6 @@ function draw() {
     ctx.stroke();
   }
 
-  // 4. Highlight current player's stores in forced-removal mode
   if (!over && alive[turn] && budgets[turn] < 0 && counts[turn] > 0) {
     for (const p of pts) {
       if (p.ci !== turn) continue;
@@ -632,27 +671,23 @@ function draw() {
   }
 }
 
-// ── Budget update (mirrors Python logic exactly) ──────────────────────────────
-// All players earn income and pay maintenance every turn.
-// The active player additionally pays a placement fee (+20) or removal credit (-10).
-// counts[] must already be updated before calling this.
+// ── Budget update ─────────────────────────────────────────────────────────────
 function updateBudgets(activeCi, movetype) {
-  computeVoronoi();  // also fills voronoiNearest for calcShares
+  computeVoronoi();
 
   const shares = calcShares();
   lastShares  = shares.slice();
   lastIncomes = shares.map(s => s * 100);
 
-  const costs = counts.map(n => 10 * n);   // maintenance: 10 per store
-  if (movetype === 1) costs[activeCi] += 20; // placement fee
-  if (movetype === 2) costs[activeCi] -= 10; // removal credit
+  const costs = counts.map(n => 10 * n);
+  if (movetype === 1) costs[activeCi] += 20;
+  if (movetype === 2) costs[activeCi] -= 10;
   lastCosts = costs.slice();
 
   for (let ci = 0; ci < 4; ci++) {
     budgets[ci] += lastIncomes[ci] - costs[ci];
   }
 
-  // Record snapshot for live graphs
   for (let ci = 0; ci < 4; ci++) {
     budgetHistory[ci].push(budgets[ci]);
     areaHistory[ci].push(lastShares[ci] * 100);
@@ -660,8 +695,8 @@ function updateBudgets(activeCi, movetype) {
 }
 
 // ── Live graphs ───────────────────────────────────────────────────────────────
-const GW = 282, GH = 168;                            // canvas internal resolution
-const GP = { top: 14, right: 10, bottom: 30, left: 42 }; // plot padding
+const GW = 282, GH = 168;
+const GP = { top: 14, right: 10, bottom: 30, left: 42 };
 
 const budgetGfxEl = document.getElementById('budget-graph');
 const areaGfxEl   = document.getElementById('area-graph');
@@ -679,11 +714,9 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
   const pw = GW - GP.left - GP.right;
   const ph = GH - GP.top  - GP.bottom;
 
-  // Background
   ctx.fillStyle = '#f9f9f9';
   ctx.fillRect(0, 0, GW, GH);
 
-  // Determine y range
   let yMin, yMax;
   if (yFixMin !== null) {
     yMin = yFixMin; yMax = yFixMax;
@@ -703,14 +736,12 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
   }
   const ySpan = yMax - yMin;
 
-  // x-axis: one entry per move (index 0 = initial state)
-  const n    = history[0].length;   // same for all players
-  const xMax = n - 1;               // 0 when only initial state exists
+  const n    = history[0].length;
+  const xMax = n - 1;
 
   const toX = t => xMax === 0 ? GP.left : GP.left + (t / xMax) * pw;
   const toY = v => GP.top + ph - ((v - yMin) / ySpan) * ph;
 
-  // Horizontal gridlines + y-axis labels
   ctx.font = '9px sans-serif';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
@@ -725,7 +756,6 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
     ctx.fillText(yFixMax === 100 ? v.toFixed(0) + '%' : v.toFixed(0), GP.left - 3, py);
   }
 
-  // Dashed zero line for budget graph when range straddles 0
   if (yFixMin === null && yMin < 0 && yMax > 0) {
     const py0 = toY(0);
     ctx.strokeStyle = 'rgba(0,0,0,0.18)';
@@ -735,7 +765,6 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
     ctx.setLineDash([]);
   }
 
-  // Axes
   ctx.strokeStyle = '#ccc';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -744,7 +773,6 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
   ctx.lineTo(GP.left + pw, GP.top + ph);
   ctx.stroke();
 
-  // x-axis tick labels
   ctx.fillStyle = '#aaa';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -758,16 +786,13 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
     }
   }
 
-  // "Turn" axis label
   ctx.fillStyle = '#bbb';
   ctx.font = '8px sans-serif';
   ctx.fillText('Turn', GP.left + pw / 2, GH - 5);
 
-  // Player lines + terminal dots
   for (let ci = 0; ci < 4; ci++) {
     const data = history[ci];
     if (data.length < 1) continue;
-
     ctx.strokeStyle = ACCENT[COLORS[ci]];
     ctx.lineWidth = 1.8;
     ctx.beginPath();
@@ -777,8 +802,6 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
       t === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     }
     ctx.stroke();
-
-    // Dot at the latest data point
     const lt = data.length - 1;
     ctx.beginPath();
     ctx.arc(toX(lt), toY(data[lt]), 2.8, 0, Math.PI * 2);
@@ -789,7 +812,6 @@ function renderGraph(ctx, history, yFixMin, yFixMax) {
 
 // ── Turn management ───────────────────────────────────────────────────────────
 
-// Check for a winner and trigger the end screen if found.
 function checkWin() {
   const survivors = alive.reduce((acc, a) => acc + (a ? 1 : 0), 0);
   if (survivors > 1) return false;
@@ -799,7 +821,6 @@ function checkWin() {
   return true;
 }
 
-// Advance `turn` to the next alive player.
 function advanceTurn() {
   for (let i = 0; i < COLORS.length; i++) {
     turn = (turn + 1) % COLORS.length;
@@ -807,31 +828,25 @@ function advanceTurn() {
   }
 }
 
-// Called at the start of a player's turn.
-// Auto-eliminates any player whose budget is negative AND who has no stores,
-// then checks for a winner and refreshes the UI.
 function prepareTurn() {
-  // Guard: up to 4 passes in case consecutive players need auto-elimination
   for (let pass = 0; pass < COLORS.length; pass++) {
     if (!alive[turn]) { advanceTurn(); continue; }
 
     if (budgets[turn] < 0 && counts[turn] === 0) {
-      // Player has negative budget with no stores to remove → eliminated
       alive[turn] = false;
       if (checkWin()) { draw(); updateUI(); drawGraphs(); return; }
       advanceTurn();
       continue;
     }
 
-    break; // this player can make a move
+    break;
   }
 
   updateUI();
   draw();
   drawGraphs();
 
-  // If the current player is AI, schedule their move after a short delay
-  if (!over && isAI[turn]) {
+  if (!over && playerType[turn] !== 0) {
     setTimeout(aiMove, AI_DELAY_MS);
   }
 }
@@ -842,13 +857,13 @@ function cssToGame(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   return {
     x:  (clientX - rect.left)  / rect.width,
-    y:  1 - (clientY - rect.top) / rect.height,   // flip y
+    y:  1 - (clientY - rect.top) / rect.height,
   };
 }
 
 function handleInput(clientX, clientY) {
   if (over) return;
-  if (isAI[turn]) return;  // ignore human clicks during AI turn
+  if (playerType[turn] !== 0) return;  // ignore clicks during AI turn
 
   const { x, y } = cssToGame(clientX, clientY);
   if (x < 0 || x > 1 || y < 0 || y > 1) return;
@@ -857,45 +872,31 @@ function handleInput(clientX, clientY) {
   let movetype = 0;
 
   if (budgets[ci] >= 0) {
-    // ── Place a new store ──────────────────────
-    // Reject if too close to any existing store (prevents visual overlap)
     for (const p of pts) {
       const dx = x - p.x, dy = y - p.y;
       if (Math.sqrt(dx * dx + dy * dy) < MIN_STORE_DIST) return;
     }
-
     pts.push({ x, y, ci });
     counts[ci]++;
     movetype = 1;
 
   } else {
-    // ── Forced removal: must click an own store ─
-    // Use Manhattan distance in game coords; tolerance ≈ 4% of board.
     const TOL = 0.04;
     let bestDist = TOL, bestIdx = -1;
-
     for (let k = 0; k < pts.length; k++) {
       if (pts[k].ci !== ci) continue;
       const dist = Math.abs(x - pts[k].x) + Math.abs(y - pts[k].y);
       if (dist < bestDist) { bestDist = dist; bestIdx = k; }
     }
-
-    if (bestIdx === -1) return;  // didn't click near own store — ignore
-
+    if (bestIdx === -1) return;
     pts.splice(bestIdx, 1);
     counts[ci]--;
     movetype = 2;
   }
 
-  // Update every player's budget (also records history snapshot)
   updateBudgets(ci, movetype);
 
-  // Check if the active player just eliminated themselves
-  // (only possible after a removal that leaves them with 0 stores and still negative budget)
-  if (budgets[ci] < 0 && counts[ci] === 0) {
-    alive[ci] = false;
-  }
-
+  if (budgets[ci] < 0 && counts[ci] === 0) alive[ci] = false;
   if (checkWin()) { draw(); updateUI(); drawGraphs(); return; }
 
   advanceTurn();
@@ -916,13 +917,13 @@ canvas.addEventListener('touchstart', e => {
 // ── Scoreboard ────────────────────────────────────────────────────────────────
 const scoreboard = document.getElementById('scoreboard');
 
+const AI_LABEL = ['', 'Greedy', 'Rival'];
+
 function updateUI() {
-  // Turn banner
   const tc = COLORS[turn];
   document.getElementById('turn-banner').textContent =
     over ? 'Game Over' : `Turn: ${NAMES[tc]}`;
 
-  // Action hint + forced-removal styling
   const hint  = document.getElementById('action-hint');
   const board = document.getElementById('board');
 
@@ -930,8 +931,8 @@ function updateUI() {
     hint.textContent = '';
     hint.className = '';
     board.className = '';
-  } else if (isAI[turn]) {
-    hint.textContent = `${NAMES[COLORS[turn]]} (AI) is thinking…`;
+  } else if (playerType[turn] !== 0) {
+    hint.textContent = `${NAMES[COLORS[turn]]} (${AI_LABEL[playerType[turn]]} AI) is thinking…`;
     hint.className = 'ai-thinking';
     board.className = 'ai-turn';
   } else if (alive[turn] && budgets[turn] < 0 && counts[turn] > 0) {
@@ -944,7 +945,6 @@ function updateUI() {
     board.className = '';
   }
 
-  // Player cards
   scoreboard.innerHTML = '';
   for (let ci = 0; ci < COLORS.length; ci++) {
     const c    = COLORS[ci];
@@ -959,7 +959,10 @@ function updateUI() {
 
     const neg    = budgets[ci] < 0;
     const status = !alive[ci] ? 'Eliminated' : ci === turn ? 'Your turn ◀' : 'Alive';
-    const badge  = isAI[ci] ? '<span class="pcard-badge">AI</span>' : '';
+
+    let badge = '';
+    if (playerType[ci] === 1) badge = '<span class="pcard-badge">Greedy</span>';
+    if (playerType[ci] === 2) badge = '<span class="pcard-badge rival">Rival</span>';
 
     card.innerHTML = `
       <div class="pcard-name">${NAMES[c]}${badge}${!alive[ci] ? ' 💀' : ''}</div>
@@ -989,7 +992,7 @@ function showEndScreen(winnerCi) {
     const wc = COLORS[winnerCi];
     title.textContent = `${NAMES[wc]} wins!`;
     title.style.color = ACCENT[wc];
-    msg.textContent   = isAI[winnerCi]
+    msg.textContent   = playerType[winnerCi] !== 0
       ? 'The AI claimed the market — better luck next time!'
       : 'Last store standing — the market is yours!';
   }
@@ -1005,22 +1008,25 @@ function buildSetupRows() {
     const c   = COLORS[ci];
     const row = document.createElement('div');
     row.className = 'setup-row';
-    row.style.background   = CARDBG[c];
+    row.style.background      = CARDBG[c];
     row.style.borderLeftColor = ACCENT[c];
     row.innerHTML = `
       <span class="setup-row-name" style="color:${ACCENT[c]}">${NAMES[c]}</span>
       <div class="toggle-group">
-        <button class="toggle-btn active" id="p${ci}-human" onclick="setPlayerType(${ci}, false)">Human</button>
-        <button class="toggle-btn"        id="p${ci}-ai"    onclick="setPlayerType(${ci}, true)">AI</button>
+        <button class="toggle-btn active"  id="p${ci}-t0" onclick="setPlayerType(${ci},0)">Human</button>
+        <button class="toggle-btn"         id="p${ci}-t1" onclick="setPlayerType(${ci},1)">Greedy AI</button>
+        <button class="toggle-btn rival-btn" id="p${ci}-t2" onclick="setPlayerType(${ci},2)">Rival AI</button>
       </div>`;
     container.appendChild(row);
   }
 }
 
-function setPlayerType(ci, ai) {
-  isAI[ci] = ai;
-  document.getElementById(`p${ci}-human`).classList.toggle('active', !ai);
-  document.getElementById(`p${ci}-ai`).classList.toggle('active', ai);
+function setPlayerType(ci, type) {
+  playerType[ci] = type;
+  for (let t = 0; t < 3; t++) {
+    const btn = document.getElementById(`p${ci}-t${t}`);
+    btn.classList.toggle('active', t === type);
+  }
 }
 
 function showSetup() {
@@ -1051,8 +1057,8 @@ function initGameState() {
 
 function resetGame() {
   document.getElementById('overlay').classList.remove('show');
-  buildSetupRows();  // reset toggles to Human defaults
-  isAI = [false, false, false, false];
+  playerType = [0, 0, 0, 0];
+  buildSetupRows();
   showSetup();
 }
 
