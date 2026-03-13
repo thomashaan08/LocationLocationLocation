@@ -523,8 +523,8 @@ function calcRelativeScore(testPts, testCounts, activeCi, movetype) {
   const shares     = calcAllSharesFast(testPts);
   const testBudgets = budgets.slice();
   const costs      = testCounts.map(n => 10 * n);
-  if (movetype === 1) costs[activeCi] += 20;
-  if (movetype === 2) costs[activeCi] -= 10;
+  if (movetype === 1) costs[activeCi] += 25;
+  if (movetype === 2) costs[activeCi] -= 15;
   for (let ci = 0; ci < 4; ci++) {
     testBudgets[ci] += shares[ci] * 100 - costs[ci];
   }
@@ -680,8 +680,8 @@ function updateBudgets(activeCi, movetype) {
   lastIncomes = shares.map(s => s * 100);
 
   const costs = counts.map(n => 10 * n);
-  if (movetype === 1) costs[activeCi] += 20;
-  if (movetype === 2) costs[activeCi] -= 10;
+  if (movetype === 1) costs[activeCi] += 25;
+  if (movetype === 2) costs[activeCi] -= 15;
   lastCosts = costs.slice();
 
   for (let ci = 0; ci < 4; ci++) {

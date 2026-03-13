@@ -186,9 +186,9 @@ def on_click(event):
 
     # Placement/removal adjustment (±5)
     if movetype == 1:
-        costs[current_color] += 20
+        costs[current_color] += 25
     elif movetype == 2:
-        costs[current_color] = costs[current_color] - 10
+        costs[current_color] = costs[current_color] - 15
 
     # Update budgets
     for c in colors:
