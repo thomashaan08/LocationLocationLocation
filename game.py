@@ -6,7 +6,7 @@ points = []
 point_colors = []
 colors = ['blue', 'red', 'green', 'yellow']
 player_names = {c: f"Player {c.capitalize()}" for c in colors}
-budgets = {c: 100.0 for c in colors}
+budgets = {c: v for c, v in zip(colors, [50.0, 85.0, 115.0, 150.0])}
 count = np.zeros(len(colors), dtype=int)
 turn = 0
 player_status = {c: 1 for c in colors}
