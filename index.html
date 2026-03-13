@@ -427,7 +427,7 @@ let playerType = [0, 0, 0, 0];
 
 // ── Mutable game state ────────────────────────────────────────────────────────
 let pts     = [];
-let budgets = [100, 100, 100, 100];
+let budgets = [50, 85, 115, 150];
 let counts  = [0, 0, 0, 0];
 let alive   = [true, true, true, true];
 let turn    = 0;
@@ -438,7 +438,7 @@ let lastIncomes = [0, 0, 0, 0];
 let lastCosts   = [0, 0, 0, 0];
 
 // ── History for live graphs ───────────────────────────────────────────────────
-let budgetHistory = [[100], [100], [100], [100]];
+let budgetHistory = [[50], [85], [115], [150]];
 let areaHistory   = [[0],   [0],   [0],   [0]  ];
 
 // ── Voronoi computation ───────────────────────────────────────────────────────
@@ -1043,7 +1043,7 @@ function startGame() {
 // ── Reset / new game ──────────────────────────────────────────────────────────
 function initGameState() {
   pts      = [];
-  budgets  = [100, 100, 100, 100];
+  budgets  = [50, 85, 115, 150];
   counts   = [0, 0, 0, 0];
   alive    = [true, true, true, true];
   turn     = 0;
@@ -1051,7 +1051,7 @@ function initGameState() {
   lastShares  = [0, 0, 0, 0];
   lastIncomes = [0, 0, 0, 0];
   lastCosts   = [0, 0, 0, 0];
-  budgetHistory = [[100], [100], [100], [100]];
+  budgetHistory = [[50], [85], [115], [150]];
   areaHistory   = [[0],   [0],   [0],   [0]  ];
 }
 
