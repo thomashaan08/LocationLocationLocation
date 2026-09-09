@@ -36,6 +36,45 @@
       color: #333;
     }
 
+    /* ── Info dropdown ──────────────────────────── */
+    #info-box {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    #info-box summary {
+      list-style: none;
+      cursor: pointer;
+      font-size: clamp(0.74rem, 2.4vw, 0.86rem);
+      font-weight: 700;
+      padding: 4px 14px;
+      border-radius: 99px;
+      background: #fff;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+      color: #555;
+      text-align: center;
+      width: fit-content;
+      margin: 0 auto;
+    }
+
+    #info-box summary::-webkit-details-marker { display: none; }
+
+    #info-box[open] summary { margin-bottom: 8px; }
+
+    #info-content {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+      padding: 12px 16px;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: #444;
+    }
+
+    #info-content p { margin-bottom: 8px; }
+    #info-content p:last-child { margin-bottom: 0; }
+    #info-content .credit { color: #777; font-style: italic; }
+
     #game-container {
       display: flex;
       gap: 14px;
@@ -331,6 +370,20 @@
 <body>
   <h1>Location, Location, Location!</h1>
   <div id="turn-banner">Turn: Player Blue</div>
+
+  <details id="info-box">
+    <summary>ℹ️ Info</summary>
+    <div id="info-content">
+      <p>
+        Take turns placing stores on the board. Each store claims the territory
+        closest to it, and you earn credits from the area you control while
+        paying upkeep (10 credits) per store each turn. Placing a new store
+        costs an extra 25 credits; removing one refunds 15. Run out of money
+        with no stores left and you're eliminated — the last player standing wins.
+      </p>
+      <p class="credit"><em>Location, Location, Location!</em> is designed by Thomas de Haan.</p>
+    </div>
+  </details>
 
   <div id="game-container">
     <div id="board-col">
